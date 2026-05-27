@@ -99,9 +99,19 @@ export interface UGSearchResult {
 
 export function extractSearchResults(store: Record<string, unknown>): UGSearchResult[] {
   try {
-    const data = (store as { store: { page: { data: { results: UGSearchResult[] } } } })
-      .store.page.data.results
-    return (data ?? []).filter((r: UGSearchResult) => r.type === 'Chords')
+    // UG embeds data at different paths depending on page version
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const s = store as any
+    const data: UGSearchResult[] =
+      s?.store?.page?.data?.results ??
+      s?.data?.results ??
+      s?.results ??
+      []
+
+    return data.filter((r: UGSearchResult) => {
+      const t = (r.type ?? '').toLowerCase()
+      return t.includes('chord') || t === '300'
+    })
   } catch {
     return []
   }
