@@ -8,15 +8,22 @@ from pydantic import BaseModel
 import yt_dlp
 from chord_detect import analyze_audio
 
-def _write_cookies_file(tmpdir: str) -> str | None:
-    """Write YT_COOKIES env var to a temp file and return path, or None."""
+def _yt_dlp_auth_opts(tmpdir: str) -> dict:
+    """Return yt-dlp auth options from env vars."""
+    opts: dict = {}
+    # Option 1: full Netscape cookies.txt content
     cookies_content = os.environ.get("YT_COOKIES", "").strip()
-    if not cookies_content:
-        return None
-    path = os.path.join(tmpdir, "cookies.txt")
-    with open(path, "w") as f:
-        f.write(cookies_content)
-    return path
+    if cookies_content:
+        path = os.path.join(tmpdir, "cookies.txt")
+        with open(path, "w") as f:
+            f.write(cookies_content)
+        opts["cookiefile"] = path
+        return opts
+    # Option 2: raw Cookie header string (easier to get from DevTools)
+    cookie_header = os.environ.get("YT_COOKIE_HEADER", "").strip()
+    if cookie_header:
+        opts["http_headers"] = {"Cookie": cookie_header}
+    return opts
 
 app = FastAPI(title="Guitar App Backend")
 
@@ -46,7 +53,6 @@ async def analyze(req: AnalyzeRequest):
     with tempfile.TemporaryDirectory() as tmpdir:
         audio_path = os.path.join(tmpdir, "audio.%(ext)s")
 
-        cookies_path = _write_cookies_file(tmpdir)
         ydl_opts = {
             "format": "bestaudio[ext=m4a]/bestaudio/best",
             "outtmpl": audio_path,
@@ -59,9 +65,8 @@ async def analyze(req: AnalyzeRequest):
                 "key": "FFmpegExtractAudio",
                 "preferredcodec": "wav",
             }],
+            **_yt_dlp_auth_opts(tmpdir),
         }
-        if cookies_path:
-            ydl_opts["cookiefile"] = cookies_path
 
         try:
             with yt_dlp.YoutubeDL(ydl_opts) as ydl:
@@ -94,15 +99,13 @@ async def search_youtube(req: SearchRequest):
     """Search YouTube using yt-dlp (no API key needed)."""
     try:
         with tempfile.TemporaryDirectory() as tmpdir:
-            cookies_path = _write_cookies_file(tmpdir)
             ydl_opts = {
                 "quiet": True,
                 "no_warnings": True,
                 "extract_flat": True,
                 "default_search": f"ytsearch{req.max_results}",
+                **_yt_dlp_auth_opts(tmpdir),
             }
-            if cookies_path:
-                ydl_opts["cookiefile"] = cookies_path
             with yt_dlp.YoutubeDL(ydl_opts) as ydl:
                 results = ydl.extract_info(f"ytsearch{req.max_results}:{req.query} guitar chords", download=False)
 
