@@ -8,6 +8,16 @@ from pydantic import BaseModel
 import yt_dlp
 from chord_detect import analyze_audio
 
+def _write_cookies_file(tmpdir: str) -> str | None:
+    """Write YT_COOKIES env var to a temp file and return path, or None."""
+    cookies_content = os.environ.get("YT_COOKIES", "").strip()
+    if not cookies_content:
+        return None
+    path = os.path.join(tmpdir, "cookies.txt")
+    with open(path, "w") as f:
+        f.write(cookies_content)
+    return path
+
 app = FastAPI(title="Guitar App Backend")
 
 # Allow requests from any origin (the PWA can be on any domain)
@@ -36,13 +46,13 @@ async def analyze(req: AnalyzeRequest):
     with tempfile.TemporaryDirectory() as tmpdir:
         audio_path = os.path.join(tmpdir, "audio.%(ext)s")
 
+        cookies_path = _write_cookies_file(tmpdir)
         ydl_opts = {
             "format": "bestaudio[ext=m4a]/bestaudio/best",
             "outtmpl": audio_path,
             "quiet": True,
             "no_warnings": True,
             "extract_flat": False,
-            # Limit download to first max_duration + 30s to avoid huge files
             "external_downloader": "ffmpeg",
             "external_downloader_args": ["-t", str(req.max_duration + 30)],
             "postprocessors": [{
@@ -50,6 +60,8 @@ async def analyze(req: AnalyzeRequest):
                 "preferredcodec": "wav",
             }],
         }
+        if cookies_path:
+            ydl_opts["cookiefile"] = cookies_path
 
         try:
             with yt_dlp.YoutubeDL(ydl_opts) as ydl:
@@ -81,14 +93,18 @@ async def analyze(req: AnalyzeRequest):
 async def search_youtube(req: SearchRequest):
     """Search YouTube using yt-dlp (no API key needed)."""
     try:
-        ydl_opts = {
-            "quiet": True,
-            "no_warnings": True,
-            "extract_flat": True,
-            "default_search": f"ytsearch{req.max_results}",
-        }
-        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-            results = ydl.extract_info(f"ytsearch{req.max_results}:{req.query} guitar chords", download=False)
+        with tempfile.TemporaryDirectory() as tmpdir:
+            cookies_path = _write_cookies_file(tmpdir)
+            ydl_opts = {
+                "quiet": True,
+                "no_warnings": True,
+                "extract_flat": True,
+                "default_search": f"ytsearch{req.max_results}",
+            }
+            if cookies_path:
+                ydl_opts["cookiefile"] = cookies_path
+            with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+                results = ydl.extract_info(f"ytsearch{req.max_results}:{req.query} guitar chords", download=False)
 
         videos = []
         for entry in (results.get("entries") or []):
