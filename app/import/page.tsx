@@ -3,69 +3,94 @@ import { useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { saveSong } from '@/lib/storage'
 import { Song } from '@/lib/types'
-import { parseUGContent, ugTabToSong, extractJsStore } from '@/lib/ugParser'
+import { parseUGContent } from '@/lib/ugParser'
 import { parseChordPro } from '@/lib/chorproParser'
 import ChordLyrics from '@/components/ChordLyrics'
 
 type Step = 'input' | 'preview'
 
+// Bookmarklet: runs in browser on a UG page, extracts structured data, copies to clipboard
+const BOOKMARKLET = `javascript:(function(){try{var d=document.querySelector('.js-store');if(!d){alert('Open a UG chord tab page first.');return;}var c=d.getAttribute('data-content').replace(/&quot;/g,'"').replace(/&amp;/g,'&').replace(/&#039;/g,"'").replace(/&lt;/g,'<').replace(/&gt;/g,'>');var j=JSON.parse(c);var tv=j.store.page.data.tab_view;var t=j.store.page.data.tab;var out=JSON.stringify({_ugimport:1,title:t.song_name,artist:t.artist_name,key:t.tonality_name||'',capo:(tv.meta&&tv.meta.capo)||0,difficulty:t.difficulty||'intermediate',content:tv.wiki_tab.content});navigator.clipboard.writeText(out).then(function(){alert('Copied! Switch to Guitar App and paste.');},function(){prompt('Copy this:',out);});}catch(e){alert('Error: '+e.message);}})();`
+
+interface UGImport {
+  _ugimport: 1
+  title: string
+  artist: string
+  key: string
+  capo: number
+  difficulty: string
+  content: string
+}
+
+const DIFFICULTY_MAP: Record<string, 1|2|3|4|5> = {
+  novice: 1, beginner: 1, easy: 1,
+  intermediate: 3,
+  advanced: 4, hard: 4, expert: 5,
+}
+
+function parsePaste(text: string): Partial<Song> {
+  const trimmed = text.trim()
+
+  // Structured import from bookmarklet
+  if (trimmed.startsWith('{"_ugimport":1')) {
+    try {
+      const data: UGImport = JSON.parse(trimmed)
+      return {
+        id: `ug-${Date.now()}`,
+        title: data.title,
+        artist: data.artist,
+        key: data.key,
+        capo: data.capo ?? 0,
+        difficulty: DIFFICULTY_MAP[data.difficulty?.toLowerCase()] ?? 3,
+        genre: 'Rock',
+        content: parseUGContent(data.content),
+        source: 'user',
+        createdAt: Date.now(),
+      }
+    } catch { /* fall through */ }
+  }
+
+  // ChordPro format
+  if (trimmed.includes('{title') || trimmed.includes('{t:')) {
+    return parseChordPro(trimmed)
+  }
+
+  // Raw UG tab text (manual copy-paste)
+  return {
+    id: `paste-${Date.now()}`,
+    title: 'Imported Song',
+    artist: '',
+    key: '',
+    capo: 0,
+    difficulty: 2,
+    genre: 'Rock',
+    content: parseUGContent(trimmed),
+    source: 'user',
+    createdAt: Date.now(),
+  }
+}
+
 export default function ImportPage() {
   const router = useRouter()
   const [query, setQuery] = useState('')
-  const [url, setUrl] = useState('')
   const [pasteContent, setPasteContent] = useState('')
   const [step, setStep] = useState<Step>('input')
   const [preview, setPreview] = useState<Partial<Song> | null>(null)
-  const [loading, setLoading] = useState(false)
-  const [error, setError] = useState('')
+  const [copied, setCopied] = useState(false)
 
   const ugSearchUrl = query.trim()
     ? `https://www.ultimate-guitar.com/search.php?search_type=title&value=${encodeURIComponent(query.trim())}&type=300`
     : 'https://www.ultimate-guitar.com'
 
-  const fetchUrl = async () => {
-    if (!url.trim()) return
-    if (!url.includes('ultimate-guitar.com')) {
-      setError('Please paste a URL from ultimate-guitar.com')
-      return
-    }
-    setLoading(true)
-    setError('')
-    try {
-      const res = await fetch(`/api/ug-tab?url=${encodeURIComponent(url.trim())}`)
-      const data = await res.json()
-      if (data.error || !data.song) {
-        setError('Could not fetch that tab — try the Paste method below instead.')
-        return
-      }
-      setPreview(data.song)
-      setStep('preview')
-    } catch {
-      setError('Fetch failed — try the Paste method below instead.')
-    } finally {
-      setLoading(false)
-    }
+  const copyBookmarklet = async () => {
+    await navigator.clipboard.writeText(BOOKMARKLET)
+    setCopied(true)
+    setTimeout(() => setCopied(false), 2000)
   }
 
   const importPaste = () => {
     if (!pasteContent.trim()) return
-    let song: Partial<Song>
-    if (pasteContent.includes('{title') || pasteContent.includes('{t:')) {
-      song = parseChordPro(pasteContent)
-    } else {
-      song = {
-        id: `paste-${Date.now()}`,
-        title: 'Imported Song',
-        artist: '',
-        key: '',
-        capo: 0,
-        difficulty: 2 as const,
-        genre: 'Rock',
-        content: parseUGContent(pasteContent),
-        source: 'user' as const,
-        createdAt: Date.now(),
-      }
-    }
+    const song = parsePaste(pasteContent)
     setPreview(song)
     setStep('preview')
   }
@@ -116,7 +141,7 @@ export default function ImportPage() {
         <p className="text-zinc-500 text-sm mt-1">From Ultimate Guitar</p>
       </div>
 
-      {/* Step 1 */}
+      {/* Step 1: Find */}
       <div className="bg-zinc-900 border border-zinc-800 rounded-xl p-4 mb-4">
         <p className="text-amber-400 text-xs font-bold uppercase tracking-widest mb-3">Step 1 — Find your song</p>
         <div className="flex gap-2">
@@ -131,68 +156,63 @@ export default function ImportPage() {
             href={ugSearchUrl}
             target="_blank"
             rel="noopener noreferrer"
-            className="px-4 py-2.5 rounded-lg bg-amber-500 text-black font-bold text-sm whitespace-nowrap active:bg-amber-400"
+            className="px-4 py-2.5 rounded-lg bg-amber-500 text-black font-bold text-sm whitespace-nowrap"
           >
             Open UG ↗
           </a>
         </div>
-        <p className="text-zinc-600 text-xs mt-2">Opens Ultimate Guitar in a new tab. Find your song, tap "Chords".</p>
+        <p className="text-zinc-600 text-xs mt-2">Opens UG in a new tab. Pick the Chords version of your song.</p>
       </div>
 
-      {/* Step 2 */}
+      {/* Step 2: Bookmarklet */}
       <div className="bg-zinc-900 border border-zinc-800 rounded-xl p-4 mb-4">
-        <p className="text-amber-400 text-xs font-bold uppercase tracking-widest mb-3">Step 2 — Import it</p>
-        <p className="text-zinc-400 text-sm mb-3">Choose whichever method works:</p>
+        <p className="text-amber-400 text-xs font-bold uppercase tracking-widest mb-3">Step 2 — Extract the tab</p>
+        <p className="text-zinc-400 text-sm mb-3">
+          Use the <span className="text-white font-medium">Guitar Importer</span> bookmarklet.
+          Click it on any UG chord page — it instantly copies the song data to your clipboard.
+        </p>
 
-        {/* Method A: URL */}
-        <div className="mb-4">
-          <p className="text-zinc-300 text-sm font-medium mb-1">A) Paste the tab URL</p>
-          <p className="text-zinc-600 text-xs mb-2">Copy the URL from your browser's address bar on the UG tab page.</p>
-          <div className="flex gap-2">
-            <input
-              type="url"
-              value={url}
-              onChange={e => setUrl(e.target.value)}
-              placeholder="https://tabs.ultimate-guitar.com/..."
-              className="flex-1 bg-zinc-800 border border-zinc-700 rounded-lg px-3 py-2.5 text-white placeholder-zinc-500 text-xs focus:outline-none focus:border-amber-500"
-            />
-            <button
-              onClick={fetchUrl}
-              disabled={loading || !url.trim()}
-              className="px-4 py-2.5 rounded-lg bg-zinc-700 text-white font-bold text-sm disabled:opacity-40 active:bg-zinc-600"
-            >
-              {loading ? '...' : 'Go'}
-            </button>
+        <div className="bg-zinc-800 border border-zinc-700 rounded-lg p-3 mb-3 flex items-center gap-3">
+          <span className="text-2xl">🔖</span>
+          <div className="flex-1 min-w-0">
+            <p className="text-white text-sm font-medium">Guitar Importer</p>
+            <p className="text-zinc-500 text-xs truncate">{BOOKMARKLET.slice(0, 50)}...</p>
           </div>
-          {error && <p className="text-red-400 text-xs mt-2">{error}</p>}
-        </div>
-
-        {/* Divider */}
-        <div className="flex items-center gap-3 mb-4">
-          <div className="flex-1 h-px bg-zinc-800" />
-          <span className="text-zinc-600 text-xs">or</span>
-          <div className="flex-1 h-px bg-zinc-800" />
-        </div>
-
-        {/* Method B: Paste */}
-        <div>
-          <p className="text-zinc-300 text-sm font-medium mb-1">B) Paste the tab text</p>
-          <p className="text-zinc-600 text-xs mb-2">On the UG tab page, long-press the chord sheet, "Select All", copy, then paste below.</p>
-          <textarea
-            value={pasteContent}
-            onChange={e => setPasteContent(e.target.value)}
-            placeholder="Paste tab content here..."
-            rows={5}
-            className="w-full bg-zinc-800 border border-zinc-700 rounded-lg px-3 py-2.5 text-white placeholder-zinc-600 text-sm focus:outline-none focus:border-amber-500 font-mono resize-none mb-2"
-          />
           <button
-            onClick={importPaste}
-            disabled={!pasteContent.trim()}
-            className="w-full py-3 rounded-lg bg-amber-500 text-black font-bold text-sm disabled:opacity-40 active:bg-amber-400"
+            onClick={copyBookmarklet}
+            className="shrink-0 px-3 py-1.5 rounded-lg bg-zinc-700 text-white text-xs font-medium active:bg-zinc-600"
           >
-            Preview & Import
+            {copied ? '✓ Copied' : 'Copy code'}
           </button>
         </div>
+
+        <details className="text-zinc-500 text-xs">
+          <summary className="cursor-pointer text-zinc-400 text-xs mb-1">How to install the bookmarklet</summary>
+          <div className="mt-2 space-y-1 text-zinc-500">
+            <p><span className="text-zinc-300">Desktop:</span> Click "Copy code" above → open Bookmarks bar → right-click → Add Bookmark → paste as URL</p>
+            <p><span className="text-zinc-300">iPhone Safari:</span> Bookmark any page → edit the bookmark → replace the URL with the copied code</p>
+            <p className="mt-2 text-zinc-600">Once installed, just click/tap it on any UG chord page to extract the song.</p>
+          </div>
+        </details>
+      </div>
+
+      {/* Step 3: Paste */}
+      <div className="bg-zinc-900 border border-zinc-800 rounded-xl p-4">
+        <p className="text-amber-400 text-xs font-bold uppercase tracking-widest mb-3">Step 3 — Paste & import</p>
+        <textarea
+          value={pasteContent}
+          onChange={e => setPasteContent(e.target.value)}
+          placeholder="Paste here — works with bookmarklet output, raw tab text, or ChordPro files..."
+          rows={5}
+          className="w-full bg-zinc-800 border border-zinc-700 rounded-lg px-3 py-2.5 text-white placeholder-zinc-600 text-sm focus:outline-none focus:border-amber-500 font-mono resize-none mb-3"
+        />
+        <button
+          onClick={importPaste}
+          disabled={!pasteContent.trim()}
+          className="w-full py-3.5 rounded-xl bg-amber-500 text-black font-bold disabled:opacity-40 active:bg-amber-400"
+        >
+          Preview & Import
+        </button>
       </div>
     </div>
   )
