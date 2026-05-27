@@ -1,0 +1,8 @@
+fastapi==0.115.0
+uvicorn[standard]==0.30.6
+yt-dlp==2024.11.18
+librosa==0.10.2
+numpy==1.26.4
+scipy==1.13.1
+python-multipart==0.0.12
+httpx==0.27.2
