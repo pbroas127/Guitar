@@ -11,8 +11,15 @@ const DIFFICULTY_MAP: Record<string, 1 | 2 | 3 | 4 | 5> = {
 
 function isChordOnlyLine(line: string): boolean {
   if (!line.trim()) return false
-  const stripped = line.replace(/\[[A-G][#b]?[^\]]*\]/g, '').trim()
-  return stripped === '' && /\[[A-G]/.test(line)
+  // Strip repeat markers like x2, (x2), x3 before checking
+  const cleaned = line.replace(/\s*\(?\s*[xX]\d+\s*\)?\s*$/, '')
+  const stripped = cleaned.replace(/\[[A-G][#b]?[^\]]*\]/g, '').trim()
+  return stripped === '' && /\[[A-G]/.test(cleaned)
+}
+
+function looksLikeTabNotation(content: string): boolean {
+  // Guitar tab uses string names followed by pipe: e|, B|, G|, D|, A|, E|
+  return /^\s*[eEBGDA]\s*\|/m.test(content)
 }
 
 function mergeChordLyric(chordLine: string, lyricLine: string): string {
@@ -36,8 +43,11 @@ function mergeChordLyric(chordLine: string, lyricLine: string): string {
 }
 
 export function parseUGContent(raw: string): string {
-  // Remove guitar tab notation blocks
-  let text = raw.replace(/\[tab\][\s\S]*?\[\/tab\]/gi, '')
+  // Only strip [tab] blocks that contain actual guitar notation (e|, B|, etc.)
+  // Chord-over-lyric content is often wrapped in [tab] blocks too — keep those
+  let text = raw.replace(/\[tab\]([\s\S]*?)\[\/tab\]/gi, (_, inner) => {
+    return looksLikeTabNotation(inner) ? '' : inner
+  })
 
   // Convert [ch]CHORD[/ch] → [CHORD]
   text = text.replace(/\[ch\](.*?)\[\/ch\]/gi, '[$1]')

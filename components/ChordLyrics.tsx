@@ -3,7 +3,7 @@ import { parseChordLine, transposeContent } from '@/lib/chords'
 
 interface Props {
   content: string
-  capoOffset: number // song.capo - selectedCapo
+  capoOffset: number
 }
 
 export default function ChordLyrics({ content, capoOffset }: Props) {
@@ -11,7 +11,7 @@ export default function ChordLyrics({ content, capoOffset }: Props) {
   const lines = transposed.split('\n')
 
   return (
-    <div className="font-mono text-base leading-none">
+    <div className="font-mono text-base leading-none select-text">
       {lines.map((line, i) => {
         if (line.startsWith('# ')) {
           return (
@@ -20,30 +20,44 @@ export default function ChordLyrics({ content, capoOffset }: Props) {
             </div>
           )
         }
+
         if (line.trim() === '') {
           return <div key={i} className="h-3" />
         }
+
         const hasChords = /\[/.test(line)
+
         if (!hasChords) {
           return (
-            <div key={i} className="text-zinc-200 mb-1 whitespace-pre">
+            <div key={i} className="text-zinc-200 mb-2 whitespace-pre leading-6">
               {line}
             </div>
           )
         }
+
         const segments = parseChordLine(line)
         return (
-          <div key={i} className="flex flex-wrap mb-1">
-            {segments.map((seg, j) => (
-              <span key={j} className="inline-flex flex-col mr-0">
-                <span className="text-amber-400 font-bold text-sm leading-5 whitespace-pre">
-                  {seg.chord ? seg.chord : seg.text ? ' '.repeat(seg.text.length) : ''}
+          <div key={i} className="flex flex-wrap mb-2 items-end">
+            {segments.map((seg, j) => {
+              // Pad chord label so it's at least as wide as the lyric text beneath it
+              const chordLabel = seg.chord || ''
+              const lyricText = seg.text || (seg.chord ? ' ' : '')
+              // Always add a trailing space to the chord to prevent adjacent chords running together
+              const chordDisplay = seg.chord
+                ? chordLabel + (lyricText.length > chordLabel.length ? '' : ' ')
+                : ' '.repeat(lyricText.length)
+
+              return (
+                <span key={j} className="inline-block" style={{ verticalAlign: 'bottom' }}>
+                  <span className="block text-amber-400 font-bold text-sm leading-5 whitespace-pre">
+                    {chordDisplay}
+                  </span>
+                  <span className="block text-zinc-100 leading-6 whitespace-pre">
+                    {lyricText}
+                  </span>
                 </span>
-                <span className="text-zinc-100 leading-6 whitespace-pre">
-                  {seg.text || (seg.chord ? ' ' : '')}
-                </span>
-              </span>
-            ))}
+              )
+            })}
           </div>
         )
       })}
