@@ -59,6 +59,7 @@ async def analyze(req: AnalyzeRequest):
             "quiet": True,
             "no_warnings": True,
             "extract_flat": False,
+            "extractor_args": {"youtube": {"player_client": ["android", "web"]}},
             "external_downloader": "ffmpeg",
             "external_downloader_args": ["-t", str(req.max_duration + 30)],
             "postprocessors": [{
@@ -104,6 +105,7 @@ async def search_youtube(req: SearchRequest):
                 "no_warnings": True,
                 "extract_flat": True,
                 "default_search": f"ytsearch{req.max_results}",
+                "extractor_args": {"youtube": {"player_client": ["android", "web"]}},
                 **_yt_dlp_auth_opts(tmpdir),
             }
             with yt_dlp.YoutubeDL(ydl_opts) as ydl:
